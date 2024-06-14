@@ -15,10 +15,18 @@ const Generate = (function () {
 
     const inputs = Inputs.readInputs(generateWarnings);
 
+    /** 
+     * Bg events require a start time in seconds, so resync them 
+     * to the metadata tempo which may differ from the MIDI tempo.
+     */
+    MidiToNotes.resyncBgEvents(inputs.tempo);
+
     const chart = {
       ...inputs,
       notes: MidiToNotes.notes,
+      improv_zones: MidiToNotes.improvZones,
       lyrics: MidiToNotes.lyrics,
+      bgdata: MidiToNotes.bgEvents,
       trackRef: (inputs.prefixTrackRef ? Math.random().toString().substring(2) + '_' : '') + inputs.trackRef,
       prefixTrackRef: undefined,
       endpoint: inputs.endpoint || MidiToNotes.calculatedEndpoint,

@@ -4,6 +4,12 @@ const MidiToNotes = (function () {
 
   const midiWarnings = new Warnings("midiwarnings");
 
+  /**
+   * MIDI files use a default of 500,000 microseconds per quarter note
+   * (120 bpm) if no tempo event is provided.
+   */
+  var baseTempo = 500000;
+
   /** Convert the midi to the notes array */
   function generateNotes(midi) {
     console.log(midi);
@@ -38,7 +44,9 @@ const MidiToNotes = (function () {
       midiWarnings.add("Unknown slide type", {});
     }
 
+    generateImprovZones(sortedMidiEvents, timeDivision);
     generateLyrics(sortedMidiEvents, timeDivision);
+    generateBgEvents(sortedMidiEvents, timeDivision);
 
     midiWarnings.display();
     Preview.display();
@@ -240,11 +248,6 @@ const MidiToNotes = (function () {
    * Operates in-place!
    */
   function adjustForTempoChanges(sortedMidiEvents) {
-    /**
-     * Value from the first tempo change, measured in microseconds per quarter note.
-     * MIDI files use a default of 500,000 (120 bpm) if no tempo event is provided.
-     */
-    let baseTempo = 500000;
     /** Value from the last tempo change, measured in microseconds per quarter note */
     let currTempo = baseTempo;
 
@@ -321,6 +324,69 @@ const MidiToNotes = (function () {
     }
   }
 
+  function generateBgEvents(sortedMidiEvents, timeDivision) {
+    MidiToNotes.bgEvents = [];
+
+    /** 
+     * Bg events are text events in the format bg_[number]. They require a 
+     * start time in both beats and seconds, so are synced to the base tempo.
+     */
+    for (const event of sortedMidiEvents) {
+      const eventType = getEventType(event);
+      if (eventType === "meta" 
+      && (event.metaType === 1)
+      && event.data.trim().startsWith("bg_")) {
+        const bgEventId = parseInt(event.data.trim().split("_").pop());
+
+        if (!isNaN(bgEventId)) {
+          MidiToNotes.bgEvents.push([
+            (event.time / timeDivision) * (baseTempo / 1000000),
+            bgEventId,
+            event.time / timeDivision,
+          ]);
+        }
+      }
+    }
+  }
+
+  /**
+   * Resyncs the start times of bg events to the given tempo in bpm.
+   * Use if the chart tempo differs from the MIDI tempo.
+   */
+  function resyncBgEvents(bpm) {
+    for (const bgEvent of MidiToNotes.bgEvents) {
+      bgEvent[0] = bgEvent[2] * (60.0 / bpm);
+    }
+  }
+
+  function generateImprovZones(sortedMidiEvents, timeDivision) {
+    MidiToNotes.improvZones = [];
+
+    let currentImprovZone;
+
+    /** 
+     * When encountering an improv_end event, combine with the previous
+     * improv_start event to create a complete improv zone.
+     */
+    for (const event of sortedMidiEvents) {
+      const eventType = getEventType(event);
+      if (eventType === "meta" && (event.metaType === 1)) {
+        if (event.data.trim() === "improv_start") {
+          currentImprovZone = {
+            start: event.time / timeDivision,
+          }; 
+        } else if (event.data.trim() === "improv_end" && currentImprovZone) {
+          MidiToNotes.improvZones.push([
+            currentImprovZone.start,
+            event.time / timeDivision,
+          ]);
+
+          currentImprovZone = undefined;
+        }
+      }
+    }
+  }
+
   /** Returns whether a note is snapped (quantized) */
   function warnIfUnsnapped(eventTime, timeDivision, snaps) {
     for (const snap of snaps) {
@@ -333,5 +399,6 @@ const MidiToNotes = (function () {
     });
   }
 
-  return { calculatedEndpoint: 1, generateNotes, lyrics: [], notes: [] };
+  return { calculatedEndpoint: 1, generateNotes, resyncBgEvents, 
+    lyrics: [], notes: [], bgEvents: [], improvZones: [] };
 })();
